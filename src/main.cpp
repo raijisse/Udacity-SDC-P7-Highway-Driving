@@ -14,6 +14,11 @@ using nlohmann::json;
 using std::string;
 using std::vector;
 
+
+double ref_vel = 0.0;
+int lane = 1;
+
+
 int main() {
   uWS::Hub h;
 
@@ -52,10 +57,9 @@ int main() {
   }
 
   // Initialize lane, 0 would be left, 1 middle and 2 right
-  const int lane = 1;
-
+  
   // Set speed instruction
-  const double target_speed = 49.5; // mph
+  
 
   h.onMessage([&map_waypoints_x,&map_waypoints_y,&map_waypoints_s,
                &map_waypoints_dx,&map_waypoints_dy]
@@ -64,6 +68,7 @@ int main() {
     // "42" at the start of the message means there's a websocket message event.
     // The 4 signifies a websocket message
     // The 2 signifies a websocket event
+    
     if (length && length > 2 && data[0] == '4' && data[1] == '2') {
 
       auto s = hasData(data);
@@ -95,7 +100,44 @@ int main() {
           //   of the road.
           auto sensor_fusion = j[1]["sensor_fusion"];
 
+          // Get the size of the previous path poitns still valid
           int prev_size = previous_path_x.size();
+
+          if(prev_size>0){
+            car_s = end_path_s;
+          }
+
+          // Initialize a value that will keep track of our car getting too close of other cars
+          bool too_close = false;
+
+          // 
+          for (int i=0; i<sensor_fusion.size(); i++){
+            // if car is in my lane
+            float d = sensor_fusion[i][6];
+            if(d < (2+4*lane+2) && d > (2+4*lane-2)){
+             
+              double vx = sensor_fusion[i][3];
+              double vy = sensor_fusion[i][4];
+              double check_speed = sqrt(vx*vx+vy*vy);
+              double check_car_s = sensor_fusion[i][5];
+
+              check_car_s += ((double)prev_size*.02*check_speed);
+
+              if((check_car_s > car_s) && ((check_car_s - car_s) < 30)){
+                too_close = true;
+                if(lane > 0 ){
+                  lane=0;
+                }
+              }
+            }
+          }
+
+          if (too_close){
+            ref_vel -= 0.224;
+          } 
+          else if(ref_vel < 49){
+            ref_vel += 0.224;
+          }
 
           // Initialize the x and y waypoints
           vector<double> xpts;
@@ -187,7 +229,7 @@ int main() {
           for(int i = 1; i <= 50 - previous_path_x.size(); i++){
 
             //Compute the number of points we have to add
-            double N = (target_dist / (0.02*49.5/2.24));
+            double N = (target_dist / (0.02*ref_vel/2.24));
             double x_point = x_add_on + (target_x)/N;
             double y_point = s(x_point);
 
