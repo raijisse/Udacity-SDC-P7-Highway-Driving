@@ -9,6 +9,7 @@
 #include "spline.h"
 #include "json.hpp"
 
+
 // for convenience
 using nlohmann::json;
 using std::string;
@@ -109,35 +110,75 @@ int main() {
 
           // Initialize a value that will keep track of our car getting too close of other cars
           bool too_close = false;
+          bool on_the_left = false;
+          bool on_the_right = false;
 
-          // 
+          // For each car detected by the sensors we are going to see if
+          // they are a potential infringement to our progress
           for (int i=0; i<sensor_fusion.size(); i++){
-            // if car is in my lane
+
+            int safety_distance = 30;
+            // d coordinates
             float d = sensor_fusion[i][6];
-            if(d < (2+4*lane+2) && d > (2+4*lane-2)){
-             
-              double vx = sensor_fusion[i][3];
-              double vy = sensor_fusion[i][4];
-              double check_speed = sqrt(vx*vx+vy*vy);
-              double check_car_s = sensor_fusion[i][5];
+            
+            double vx = sensor_fusion[i][3];
+            double vy = sensor_fusion[i][4];
+            double check_speed = sqrt(vx*vx+vy*vy);
+            double check_car_s = sensor_fusion[i][5];
 
-              check_car_s += ((double)prev_size*.02*check_speed);
-
-              if((check_car_s > car_s) && ((check_car_s - car_s) < 30)){
+            check_car_s += ((double)prev_size*.02*check_speed);
+            
+            // Check where other cars are:
+            // 1) Check if a car is in my lane
+            if(d < (2+4*lane+2) && d > (2+4*lane-2)){ 
+              // If it is in my lane, check the distance between the ego
+              // vehicle and the other one. 
+              if((check_car_s > car_s) && ((check_car_s - car_s) < safety_distance)){
                 too_close = true;
-                if(lane > 0 ){
-                  lane=0;
                 }
               }
+            
+            // 2) Check if a car is on the lane to my left
+            else if(d < (4*lane) && d > (4*lane-4)){
+              // Check if there is enough space to pass the vehicle in front of me
+              if((check_car_s > (car_s-safety_distance)) && ((check_car_s < (car_s+safety_distance)))){
+                on_the_left = true;
+                }              
+            }
+
+            // 3) Check if a car is on the lane to my right
+            else if((d > (4*lane+4)) && (d < (4*lane + 8))){
+              // Check if there is enough space to pass the vehicle in front of me
+              if((check_car_s > (car_s-safety_distance)) && ((check_car_s < (car_s+safety_distance)))){
+                on_the_right = true;
+                }
+            
+            }
+          }
+          
+          // If there is a car ahead
+          if (too_close == true){
+            // and that the left lane is empty, we can go the left lane
+            if ((on_the_left == false) && (lane >= 1)){
+              lane -= 1;
+            }
+            // otherwise we try to go to the right lane
+            else if ((on_the_right == false) && (lane <2)){
+              lane += 1;
+            }
+            // If no passing is possible, we reduce speed
+            else {
+              ref_vel -= 0.224;
+            }
+          }
+          // Finally, if there is no car ahead, we just check that the current speed is close
+          // to the target speed, otherwise we accelerate
+          else {
+            if((ref_vel < 49)){
+              ref_vel += 0.224;
             }
           }
 
-          if (too_close){
-            ref_vel -= 0.224;
-          } 
-          else if(ref_vel < 49){
-            ref_vel += 0.224;
-          }
 
           // Initialize the x and y waypoints
           vector<double> xpts;
