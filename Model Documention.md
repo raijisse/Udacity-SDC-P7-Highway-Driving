@@ -277,3 +277,4 @@ And there we have it : our new trajectory and decision making that sould be able
 By lack of time, the implementation here is a very simple one that does the job. However, there are many improvements that could be done:
 - model more precisely the behavior of other vehicles to be able to take better informed decisions regarding the behavior of other vehicles
 - Optimize by implementing a cost function that would take much more parameters than what we have done in this implementation such as other driver behaviors, planning ahead, estimated speed along the different options etc.
+For instance a behavior to correct could be to optimize speed as I noticed that the car often brakes too much before accelerating again, and it would probably be more efficient to adapt speed more smoothly.
