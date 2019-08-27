@@ -131,11 +131,149 @@ If there are no cars ahead, we just keep lane and make sure we are going fast en
 
 ### Trajectory planning
 
+`
+
+          // Initialize the x and y waypoints
+          vector<double> xpts;
+          vector<double> ypts;
+
+          // Keep track of x, y and yaw :
+          // Starting point or previous path point
+          double x_ref = car_x;
+          double y_ref = car_y;
+          double yaw_ref = deg2rad(car_yaw);
+ `
+ Now that we know what action to take, we need to know how to get there and generate a smooth trajectory to this point. 
+ So we will initiate a vector of x and y points where the car is going to drive. Let's see how it is done.
+
+ `
+
+          // If we do not have two waypoints, create a second one from the starting point
+
+          if(prev_size < 2){
+            double prev_car_x = car_x - cos(car_yaw);
+            double prev_car_y = car_y - sin(car_yaw);
+
+            // The first waypoint is an estimated one based on current yaw rate (tangent trajectory)
+            xpts.push_back(prev_car_x);
+            // The second one is the starting (current at t=0) position
+            // Hence we populate waypoints for the first iteration
+            xpts.push_back(car_x);
+            // Likewise for y
+            ypts.push_back(prev_car_y);
+            ypts.push_back(car_y);
+
+
+          }
+          else {
+            x_ref = previous_path_x[prev_size-1];
+            y_ref = previous_path_y[prev_size-1];
+
+            double x_ref_prev = previous_path_x[prev_size-2];
+            double y_ref_prev = previous_path_y[prev_size-2];
+            yaw_ref = atan2(y_ref-y_ref_prev, x_ref-x_ref_prev);
+
+            xpts.push_back(x_ref_prev);
+            xpts.push_back(x_ref);
+
+            ypts.push_back(y_ref_prev);
+            ypts.push_back(y_ref);
+          }
+  `
+  
+  For the first iteration, we create two points based on the starting point and an generated one before that. Otherwise, we add the two last registered path points.
+
+
+`
+
+          // In Frenet coordinates, add 30m evenly spaced waypoints
+          vector<double> next_wp0 = getXY(car_s+30, (2+4*lane), map_waypoints_s, map_waypoints_x, map_waypoints_y);
+          vector<double> next_wp1 = getXY(car_s+60, (2+4*lane), map_waypoints_s, map_waypoints_x, map_waypoints_y);
+          vector<double> next_wp2 = getXY(car_s+90, (2+4*lane), map_waypoints_s, map_waypoints_x, map_waypoints_y);
+
+          xpts.push_back(next_wp0[0]);
+          xpts.push_back(next_wp1[0]);
+          xpts.push_back(next_wp2[0]);
+
+          ypts.push_back(next_wp0[1]);
+          ypts.push_back(next_wp1[1]);
+          ypts.push_back(next_wp2[1]);
+
+          for (int i = 0; i < xpts.size(); ++i) {
+            
+            // Shift in rotation to make the maths easier
+            double x_shift = xpts[i]-x_ref;
+            double y_shift = ypts[i]-y_ref;
+
+            xpts[i] = (x_shift * cos(0-yaw_ref) - y_shift * sin(0-yaw_ref));
+            ypts[i] = (x_shift * sin(0-yaw_ref) + y_shift * cos(0-yaw_ref));
+          }
+`
+
+Then, we generate 3 points, one at s+30m, one at s+60 and one at s+90 points, that will show us the way we have to drive (including lane).
+So, in the end, we have a vector of previous waypoints, and three new waypoints at s+30,s+60 and s+90.
+
+
 ### Smoothing
+Now that we have the waypoints, we have to make sure that the trajectory 
+is smooth enough not to generate excessive jerk or unwanted behavior. To do so, we use smoothing splines from this [library](https://kluge.in-chemnitz.de/opensource/spline/). Smoothing splines is an interpolation techniques that will estimate a curve from a set of (x,y) points. The estimated curve will pass through all the points, while ensuring a certain degree of smoothness.
+
+Once we have done that, we generate our trajectory (`next_x_vals`). In order to do so, we first use the previous waypoints to prevent re-generating waypoints that should still be valid, and that could generate excessive jerk if we regenerate all points each time. Hence, we will use the smoothed new trajectory only to complete the previous points vector, until our vector reach a size of 50 and represents a distance of 30m.
+
+`
+          tk::spline s;
+
+          // Set xpts and ypts to the spline
+          s.set_points(xpts, ypts);
+
+          // Initialize the next x and y waypoints
+          vector<double> next_x_vals;
+          vector<double> next_y_vals;
+
+          // Append previous paths points
+          for(int i=0; i < previous_path_x.size(); i++){
+            next_x_vals.push_back(previous_path_x[i]);
+            next_y_vals.push_back(previous_path_y[i]);
+          }
+
+          double target_x = 30.0; //m
+          double target_y = s(target_x); //m
+          double target_dist = sqrt((target_x*target_x) + (target_y*target_y));
+
+          double x_add_on = 0;
+
+          // Fill up the rest of our waypaths points
+          for(int i = 1; i <= 50 - previous_path_x.size(); i++){
+
+            //Compute the number of points we have to add
+            double N = (target_dist / (0.02*ref_vel/2.24));
+            double x_point = x_add_on + (target_x)/N;
+            double y_point = s(x_point);
+
+            x_add_on = x_point;
+
+            double ref_x = x_point;
+            double ref_y = y_point;
+
+            //rotate back to normal
+            x_point = (ref_x *cos(yaw_ref) - ref_y*sin(yaw_ref));
+            y_point = (ref_x *sin(yaw_ref) + ref_y*cos(yaw_ref));
+            
+            x_point += x_ref;
+            y_point += y_ref;
+
+            next_x_vals.push_back(x_point);
+            next_y_vals.push_back(y_point);
+
+          }
+
+`
+
+And there we have it : our new trajectory and decision making that sould be able to drive us along the highway withou collisions, unwanted jerk or excessive acceleration.
 
 
 ### Limitations
 
-By lack of time, the implementation here is a very simple one that does the job. There are many improvements that can be done:
-- modelize more precisely the behavior of other vehicles
-- Optimize by implementing a cost function that would take much more parameters than what we have done in this implementation
+By lack of time, the implementation here is a very simple one that does the job. However, there are many improvements that could be done:
+- model more precisely the behavior of other vehicles to be able to take better informed decisions regarding the behavior of other vehicles
+- Optimize by implementing a cost function that would take much more parameters than what we have done in this implementation such as other driver behaviors, planning ahead, estimated speed along the different options etc.
