@@ -20,6 +20,11 @@ double ref_vel = 0.0;
 int lane = 1;
 
 
+enum states { KL, PLCR, PLCL, LCR, LCL };
+states previous_state = KL;
+
+
+
 int main() {
   uWS::Hub h;
 
@@ -141,7 +146,9 @@ int main() {
             // 2) Check if a car is on the lane to my left
             else if(d < (4*lane) && d > (4*lane-4)){
               // Check if there is enough space to pass the vehicle in front of me
-              if((check_car_s > (car_s-safety_distance)) && ((check_car_s < (car_s+safety_distance)))){
+              // I divide by 2 the safety distance when checking where the car behind
+              // me is located to be able to pass slightly more aggresively
+              if((check_car_s > (car_s-safety_distance/2)) && ((check_car_s < (car_s+safety_distance)))){
                 on_the_left = true;
                 }              
             }
@@ -149,22 +156,29 @@ int main() {
             // 3) Check if a car is on the lane to my right
             else if((d > (4*lane+4)) && (d < (4*lane + 8))){
               // Check if there is enough space to pass the vehicle in front of me
-              if((check_car_s > (car_s-safety_distance)) && ((check_car_s < (car_s+safety_distance)))){
+              if((check_car_s > (car_s-safety_distance/2)) && ((check_car_s < (car_s+safety_distance)))){
                 on_the_right = true;
                 }
-            
             }
           }
           
           // If there is a car ahead
           if (too_close == true){
             // and that the left lane is empty, we can go the left lane
-            if ((on_the_left == false) && (lane >= 1)){
+            if ((on_the_left == false) && (lane >= 1) && (previous_state == KL)){
+              previous_state = PLCL;
+            }
+            else if ((on_the_left == false) && (lane >= 1) && (previous_state == PLCL)){
               lane -= 1;
+              previous_state = KL;
             }
             // otherwise we try to go to the right lane
-            else if ((on_the_right == false) && (lane <2)){
+            else if ((on_the_right == false) && (lane <2) && (previous_state == KL)){
+              previous_state = PLCR;
+            }
+            else if ((on_the_right == false) && (lane <2) && (previous_state == PLCR)){
               lane += 1;
+              previous_state = KL;
             }
             // If no passing is possible, we reduce speed
             else {
@@ -174,7 +188,7 @@ int main() {
           // Finally, if there is no car ahead, we just check that the current speed is close
           // to the target speed, otherwise we accelerate
           else {
-            if((ref_vel < 49)){
+            if((ref_vel < 49.5)){
               ref_vel += 0.224;
             }
           }
